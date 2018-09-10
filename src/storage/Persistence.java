@@ -21,15 +21,15 @@ public interface Persistence {
 
     /**
      * 打开某张表
-     * @param schema
+     * @param table 指定的表
      */
-    void open(Schema schema);
+    void open(Table table);
 
     /**
      * 关闭某张表
-     * @param schema
+     * @param table 指定的表
      */
-    void close(Schema schema);
+    void close(Table table);
 
     /**
      * 向数据表中，加载记录

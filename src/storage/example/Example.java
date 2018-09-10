@@ -1,6 +1,7 @@
 package storage.example;
 
 import exception.StorageException;
+import javafx.scene.control.Tab;
 import number.Unsigned;
 import storage.Persistence;
 import storage.Serializer;
@@ -388,12 +389,12 @@ public class Example implements Persistence {
     }
 
     @Override
-    public void open(Schema schema) {
+    public void open(Table table) {
 
     }
 
     @Override
-    public void close(Schema schema) {
+    public void close(Table table) {
 
     }
 
