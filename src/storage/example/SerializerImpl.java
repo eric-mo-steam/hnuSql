@@ -1,10 +1,13 @@
 package storage.example;
 
 import common.Global;
+import common.Status;
+import exception.BizException;
 import number.Unsigned;
 import storage.Serializer;
 import structure.*;
 
+import java.math.BigInteger;
 import java.nio.charset.Charset;
 import java.util.Arrays;
 
@@ -20,12 +23,13 @@ public class SerializerImpl implements Serializer {
     private static final int DEFAULT_BUFFER_SIZE = 4096;
 
     /**
-     * 根据字段类型和字面值长度，计算实际存储所需的字节数
-     *
-     * @param fieldType
-     * @param length
+     * 计算指定字段的存储字节数
+     * @param field 指定的字段
+     * @return 所需的存储字节数
      */
-    private int getSize(FieldType fieldType, int length) {
+    private int getStoreSize(Field field) {
+        FieldType fieldType = field.getFieldType();
+        int length = field.getLength();
         switch (fieldType) {
             case INTEGER:
                 return (int) Math.ceil(1.0 * (Math.getExponent(Math.pow(10, length) - 1) + 2) / 8);
@@ -38,7 +42,57 @@ public class SerializerImpl implements Serializer {
 
     @Override
     public byte[] serializeRecord(Schema schema, Record record) {
-        return null;
+        SchemaImpl schemaImpl = (SchemaImpl) schema;
+        if (schema == null) {
+            throw new BizException("No Schema in record");
+        }
+
+        byte[] buffer = new byte[schemaImpl.getRecordSize()];
+        if (record.getStatus() == Status.DELETE) {
+            return buffer;
+        }
+
+        Field[] fields = schema.getFields();
+        // 略过前导的标志位字节
+        int pos = (int) Math.ceil(1.0 * (1 + fields.length) / 8);
+
+        for (int i = 0;i < fields.length;i++) {
+            Object value = record.getColumn(i);
+            if (value == null) {
+                int index = (i + 1) / 8;
+                int remain = (i + 1) % 8;
+                // 将该列的null标志位置1
+                buffer[index] &= 1 << (7 - remain);
+                continue;
+            }
+
+            FieldType fieldType = fields[i].getFieldType();
+            switch (fieldType) {
+                case CHAR:
+                    String str = (String) value;
+                    byte[] chars = str.getBytes(charset);
+                    int storeSize = getStoreSize(fields[i]);
+                    System.arraycopy(chars, 0, buffer, pos, Math.min(chars.length, storeSize));
+                    pos += storeSize;
+                    break;
+                case INTEGER:
+                    BigInteger n = (BigInteger) value;
+                    byte[] bytes = n.toByteArray();
+                    int size = getStoreSize(fields[i]);
+
+                    int fillSize = size - bytes.length;     // 计算需要先行填充字节数
+                    byte fillByte = (byte) (n.signum() >= 0? 0x0 : 0xFF);   // 填充的字节
+                    while (fillSize-- > 0) {
+                        buffer[pos++] = fillByte;
+                    }
+                    // 将数据拷入
+                    System.arraycopy(bytes, 0, buffer, pos, bytes.length);
+                    pos += bytes.length;
+                    break;
+            }
+        }
+        buffer[0] &= 1 << 7;
+        return buffer;
     }
 
     @Override
@@ -69,7 +123,7 @@ public class SerializerImpl implements Serializer {
             // 存储字段的字面值长度
             buf[pos++] = (byte) field.getLength();
             // 存储字段的实际存储字节数
-            int size = getSize(field.getFieldType(), field.getLength());
+            int size = getStoreSize(field);
             recordSize += size;
             buf[pos++] = (byte) size;
             // 保存该字段的选项
@@ -88,7 +142,40 @@ public class SerializerImpl implements Serializer {
 
     @Override
     public Record deserializeRecord(Schema schema, byte[] bytes) {
-        return null;
+        if (schema == null) {
+            throw new BizException("No Schema in record");
+        }
+        SchemaImpl schemaImpl = (SchemaImpl) schema;
+        Factory factory = Global.getInstance().getFactory();
+        RecordImpl recordImpl = (RecordImpl) factory.produceRecords(1, schemaImpl.getRecordSize())[0];
+        Field[] fields = schemaImpl.getFields();
+
+        // 略过前导的标志位字节
+        int pos = (int) Math.ceil(1.0 * (1 + fields.length) / 8);
+
+        for(int i = 0;i < fields.length;i++) {
+            int index = (i + 1) / 8;
+            int remain = (i + 1) % 8;
+            // 将该列的null标志位置1
+            int nullFlag = (bytes[index] >> (7 - remain)) & 0x1;
+            if (nullFlag != 1) {    // null标志位不为1，表明该列的值不为null
+                FieldType fieldType = fields[i].getFieldType();
+                int storeSize = getStoreSize(fields[i]);
+                switch (fieldType) {
+                    case CHAR:
+                        String str = new String(bytes, pos, storeSize, charset);
+                        recordImpl.setColumn(i, str);
+                        break;
+                    case INTEGER:
+                        BigInteger n = new BigInteger(Arrays.copyOfRange(bytes, pos, pos + storeSize));
+                        recordImpl.setColumn(i, n);
+                        break;
+                }
+                pos += storeSize;
+            }
+        }
+        recordImpl.setStatus(Status.LOAD);
+        return recordImpl;
     }
 
     @Override

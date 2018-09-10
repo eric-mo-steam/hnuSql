@@ -12,20 +12,20 @@ public abstract class Record {
      */
     private Status status;
 
-    public Record() {
-
+    public Record(int size) {
+        columns = new Object[size];
     }
 
     public int length() {
         return columns.length;
     }
 
-    public Object[] getColumns() {
-        return columns;
+    public Object getColumn(int index) {
+        return columns[index];
     }
 
-    public void setColumns(Object[] columns) {
-        this.columns = columns;
+    public void setColumn(int index, Object value) {
+        columns[index] = value;
     }
 
     public Status getStatus() {

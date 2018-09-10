@@ -22,6 +22,15 @@ public class Field {
      */
     private boolean isKey;
 
+    public Field(String name, int length, FieldType fieldType) {
+        this.name = name;
+        this.length = length;
+        this.fieldType = fieldType;
+    }
+
+    public Field() {
+    }
+
     public String getName() {
         return name;
     }

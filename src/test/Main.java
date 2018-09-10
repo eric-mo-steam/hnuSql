@@ -4,10 +4,7 @@ import common.Global;
 import common.Status;
 import storage.Persistence;
 import storage.example.SchemaImpl;
-import structure.Field;
-import structure.FieldType;
-import structure.Table;
-import structure.Schema;
+import structure.*;
 
 import java.io.*;
 import java.math.BigInteger;
@@ -18,8 +15,7 @@ import java.util.Arrays;
 
 public class Main {
     public static void main(String[] args) {
-        testExample();
-
+        testReadRecords();
     }
 
     public static void testArraysCopy() {
@@ -44,9 +40,8 @@ public class Main {
         try {
             fout = new FileInputStream("NIO-test.txt");
             FileChannel channel = fout.getChannel();
-            channel.position(2);
             ByteBuffer rBuffer = ByteBuffer.allocate(1);
-            channel.read(rBuffer);
+            int size = channel.read(rBuffer);
             System.out.write(rBuffer.array());
 //            int i = 9;
 //            ByteBuffer byteBuffer = ByteBuffer.wrap("1".getBytes());
@@ -105,5 +100,50 @@ public class Main {
 
         boolean b = storage.writeSchema(schema);
 //        storage.loadSchemas();
+    }
+
+
+    public static void testWriteRecords() {
+        Persistence storage = Global.getInstance().getPersistence();
+        Field field1 = new Field("id", 8, FieldType.INTEGER);
+        Field field2 = new Field("name", 20, FieldType.CHAR);
+
+        SchemaImpl schema = new SchemaImpl();
+        schema.setTableName("test");
+        schema.setFields(new Field[]{field1, field2});
+        schema.setRecordSize(85);
+
+        Table table = new Table(schema, 3);
+        Record[] records = table.getRecords();
+
+        records[0].setColumn(0, BigInteger.valueOf(12));
+        records[0].setColumn(1, "mo");
+        records[0].setStatus(Status.NEW);
+
+        records[1].setColumn(0, BigInteger.valueOf(45));
+        records[1].setColumn(1, "xiao");
+        records[1].setStatus(Status.NEW);
+
+        records[2].setColumn(0, BigInteger.valueOf(60));
+        records[2].setColumn(1, "jiang");
+        records[2].setStatus(Status.NEW);
+
+        storage.open(table);
+        storage.writeRecords(table);
+    }
+
+    public static void testReadRecords() {
+        Persistence storage = Global.getInstance().getPersistence();
+        Field field1 = new Field("id", 8, FieldType.INTEGER);
+        Field field2 = new Field("name", 20, FieldType.CHAR);
+
+        SchemaImpl schema = new SchemaImpl();
+        schema.setTableName("test");
+        schema.setFields(new Field[]{field1, field2});
+        schema.setRecordSize(85);
+
+        Table table = new Table(schema, 3);
+        storage.open(table);
+        storage.loadRecords(table);
     }
 }

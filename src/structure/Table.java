@@ -17,7 +17,7 @@ public class Table {
 
     public Table(Schema schema, int size) {
         Factory factory = Global.getInstance().getFactory();
-        this.records = factory.produceRecords(size);
+        this.records = factory.produceRecords(size, schema.getFields().length);
         this.schema = schema;
     }
 

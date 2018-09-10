@@ -20,13 +20,13 @@ public interface Persistence {
     Schema[] loadSchemas();
 
     /**
-     * 打开某张表
+     * 打开某张表，让表处于可读写状态
      * @param table 指定的表
      */
     void open(Table table);
 
     /**
-     * 关闭某张表
+     * 关闭某张表，让表处于不可读写状态
      * @param table 指定的表
      */
     void close(Table table);

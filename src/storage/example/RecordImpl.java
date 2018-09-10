@@ -8,6 +8,10 @@ public class RecordImpl extends Record {
      */
     private long offset;
 
+    public RecordImpl(int size) {
+        super(size);
+    }
+
     public long getOffset() {
         return offset;
     }
