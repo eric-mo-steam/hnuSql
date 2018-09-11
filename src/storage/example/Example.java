@@ -77,7 +77,13 @@ public class Example implements Persistence {
             return false;
         }
         if (schema.getStatus() == Status.DELETE) {
-            /** 未实现　**/
+            String filepath = ROOT + File.separator + schema.getTableName() + SCHEMA_SUFFIX;
+            File file = new File(filepath);
+            file.delete();
+
+            filepath = ROOT + File.separator + schema.getTableName() + TABLE_DATA_SUFFIX;
+            file = new File(filepath);
+            file.delete();
             return true;
         }
         FileOutputStream fout = null;
@@ -196,17 +202,20 @@ public class Example implements Persistence {
         int recordSize = schemaImpl.getRecordSize();
         Record[] records = table.getRecords();
         String filepath = ROOT + File.separator + schemaImpl.getTableName() + TABLE_DATA_SUFFIX;
-        long count = 0;
-        for (int i = 0; i < records.length; i++) {
+        int count = 0;
+        while (count < records.length) {
             ByteBuffer buffer = ByteBuffer.allocate(recordSize);
             int readSize = readFile(filepath, recordSize * currentRecordOffset, buffer);
             if (readSize == -1) {
                 break;
             } else {
-                records[i] = serializer.deserializeRecord(schemaImpl, buffer.array());
-                ((RecordImpl)records[i]).setOffset(currentRecordOffset);
+                RecordImpl recordImpl = (RecordImpl) serializer.deserializeRecord(schemaImpl, buffer.array());
+                if (recordImpl != null) {
+                    records[count] = recordImpl;
+                    recordImpl.setOffset(currentRecordOffset);
+                    count++;
+                }
                 currentRecordOffset++;
-                count++;
             }
         }
         return count;
@@ -233,8 +242,11 @@ public class Example implements Persistence {
                 writeFile(filepath, recordSize * newRecordOffset++, ByteBuffer.wrap(bytes));
                 hasNew = true;
                 count++;
-            } else if (recordImpl.getStatus() == Status.UPDATE || recordImpl.getStatus() == Status.DELETE) {
-                writeFile(filepath, recordImpl.getOffset(), ByteBuffer.wrap(bytes));
+            } else if (recordImpl.getStatus() == Status.UPDATE) {
+                writeFile(filepath, recordSize * recordImpl.getOffset(), ByteBuffer.wrap(bytes));
+                count++;
+            } else if (recordImpl.getStatus() == Status.DELETE) {
+                writeFile(filepath, recordSize * recordImpl.getOffset(), ByteBuffer.wrap(bytes));
                 count++;
             }
         }
@@ -618,13 +630,6 @@ public class Example implements Persistence {
             e.printStackTrace();
             throw new StorageException(e.getMessage());
         } finally {
-            if (raf != null) {
-                try {
-                    raf.close();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-            }
             if (channel != null) {
                 try {
                     channel.close();
@@ -632,6 +637,14 @@ public class Example implements Persistence {
                     e.printStackTrace();
                 }
             }
+            if (raf != null) {
+                try {
+                    raf.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+
         }
     }
 }

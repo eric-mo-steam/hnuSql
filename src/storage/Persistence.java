@@ -52,7 +52,7 @@ public interface Persistence {
      * @param upperBounds 索引组合值的上界
      * @return 实际加载的记录个数
      */
-    long loadRecordsById(Table table, Field index, Object lowerBound, Object upperBound);
+    long loadRecordsById(Table table, Field indexs, Object lowerBounds, Object upperBounds);
 
 
 

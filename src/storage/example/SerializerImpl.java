@@ -92,7 +92,7 @@ public class SerializerImpl implements Serializer {
                     break;
             }
         }
-        buffer[0] &= 1 << 7;
+        buffer[0] |= 1 << 7;
         return buffer;
     }
 
@@ -106,11 +106,16 @@ public class SerializerImpl implements Serializer {
         // buf[2, 3]为单个记录的存储字节数，最后保存（小端法保存）
         pos += 4;
         SchemaImpl schemaImpl = (SchemaImpl) schema;
-        long newRecordOffset = schemaImpl.getNewRecordOffset();
-        buf[pos++] = (byte) (newRecordOffset >>> 24 & 0xFF);
-        buf[pos++] = (byte) (newRecordOffset >>> 16 & 0xFF);
-        buf[pos++] = (byte) (newRecordOffset >>> 8 & 0xFF);
-        buf[pos++] = (byte) (newRecordOffset & 0xFF);
+        if (schema.getStatus() == Status.NEW) {
+            Arrays.fill(buf, pos, pos + 4, (byte) 0);
+            pos += 4;
+        } else if (schema.getStatus() == Status.UPDATE) {
+            long newRecordOffset = schemaImpl.getNewRecordOffset();
+            buf[pos++] = (byte) (newRecordOffset >>> 24 & 0xFF);
+            buf[pos++] = (byte) (newRecordOffset >>> 16 & 0xFF);
+            buf[pos++] = (byte) (newRecordOffset >>> 8 & 0xFF);
+            buf[pos++] = (byte) (newRecordOffset & 0xFF);
+        }
 
         // 字段数
         buf[pos++] = (byte) schema.getFields().length;
@@ -154,7 +159,9 @@ public class SerializerImpl implements Serializer {
         Field[] fields = schemaImpl.getFields();
         RecordImpl recordImpl = (RecordImpl) factory.produceRecords(1, fields.length)[0];
 
-
+        if ((bytes[0] >>> 7 & 0x1) == 0) {
+            return null;
+        }
         // 略过前导的标志位字节
         int pos = (int) Math.ceil(1.0 * (1 + fields.length) / 8);
 
@@ -208,7 +215,7 @@ public class SerializerImpl implements Serializer {
             Field field = new Field();
             field.setFieldType(FieldType.valueOf(Unsigned.toUnsignedByte(bytes[pos++])));
             int length = Unsigned.toUnsignedByte(bytes[pos++]);
-            field.setName(new String(bytes, pos, length));
+            field.setName(new String(bytes, pos, length, charset));
             pos += length;
             field.setLength(Unsigned.toUnsignedByte(bytes[pos++]));
             pos++;

@@ -14,8 +14,19 @@ import java.nio.charset.Charset;
 import java.util.Arrays;
 
 public class Main {
-    public static void main(String[] args) {
+    public static void main(String[] args) throws IOException {
+//        testDeleteSchema();
+//        testCreateSchema();
+
+//        testPrintAllSchema();
+        testUpdateRecord();
+
+//        testDeleteRecord();
         testPrintAllRecord();
+
+//        byte[] bytes = "num".getBytes(Charset.forName("utf32"));
+//        String str = new String(bytes, 0, bytes.length, Charset.forName("utf32"));
+//        System.out.println(str.getBytes(Charset.forName("utf32")).length);
     }
 
     public static void testPrintAllSchema() {
@@ -49,7 +60,10 @@ public class Main {
     }
 
     public static void testDeleteSchema() {
-        /** 未实现 **/
+        Persistence storage = Global.getInstance().getPersistence();
+        Schema[] schemas = storage.loadSchemas();
+        schemas[0].setStatus(Status.DELETE);
+        storage.writeSchema(schemas[0]);
     }
 
     public static void testPrintAllRecord() {
@@ -75,6 +89,33 @@ public class Main {
         record.setColumn(0, BigInteger.valueOf(123));
         storage.open(table);
         storage.writeRecords(table);
+        storage.close(table);
+    }
+
+    public static void testUpdateRecord() {
+        Persistence storage = Global.getInstance().getPersistence();
+        Schema[] schemas = storage.loadSchemas();
+        Table table = new Table(schemas[0], 1);
+        storage.open(table);
+        storage.loadRecords(table); // 载入一条记录
+        Record[] records = table.getRecords();
+        records[0].setColumn(0, new BigInteger("ff", 16));
+        records[0].setStatus(Status.UPDATE);
+        storage.open(table);
+        storage.writeRecords(table);
+    }
+
+    public static void testDeleteRecord() {
+        Persistence storage = Global.getInstance().getPersistence();
+        Schema[] schemas = storage.loadSchemas();
+        Table table = new Table(schemas[0], 1);
+        storage.open(table);
+        storage.loadRecords(table); // 载入一条记录
+        storage.close(table);
+        table.getRecords()[0].setStatus(Status.DELETE);
+        storage.open(table);
+        storage.writeRecords(table);
+        storage.close(table);
     }
 
     private static void printRecord(Record record) {
