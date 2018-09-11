@@ -28,6 +28,10 @@ public abstract class Record {
         columns[index] = value;
     }
 
+    public int getColumnSize() {
+        return columns.length;
+    }
+
     public Status getStatus() {
         return status;
     }

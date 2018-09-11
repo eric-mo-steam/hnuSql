@@ -3,6 +3,7 @@ package storage.example;
 import common.Global;
 import common.Status;
 import exception.BizException;
+import exception.StorageException;
 import number.Unsigned;
 import storage.Serializer;
 import structure.*;
@@ -104,9 +105,12 @@ public class SerializerImpl implements Serializer {
         // buf[0, 1]为整个的表模式的存储字节数，最后保存（小端法保存）
         // buf[2, 3]为单个记录的存储字节数，最后保存（小端法保存）
         pos += 4;
-        // buf[4, 5, 6, 7]为新记录的偏移记录数，初始化为0
-        Arrays.fill(buf, pos, pos + 4, (byte) 0);
-        pos += 4;
+        SchemaImpl schemaImpl = (SchemaImpl) schema;
+        long newRecordOffset = schemaImpl.getNewRecordOffset();
+        buf[pos++] = (byte) (newRecordOffset >>> 24 & 0xFF);
+        buf[pos++] = (byte) (newRecordOffset >>> 16 & 0xFF);
+        buf[pos++] = (byte) (newRecordOffset >>> 8 & 0xFF);
+        buf[pos++] = (byte) (newRecordOffset & 0xFF);
 
         // 字段数
         buf[pos++] = (byte) schema.getFields().length;
@@ -132,11 +136,11 @@ public class SerializerImpl implements Serializer {
         // 记录中指示null字段数所需字节：一个有效位加n个字段的null指示位
         recordSize += Math.ceil(1.0 * (1 + schema.getFields().length) / 8);
         // 保存整个表模式的存储字节数
-        buf[0] = (byte) (pos & 0xFF);
-        buf[1] = (byte) (pos & 0xFF00);
+        buf[0] = (byte) (pos >>> 8 & 0xFF);
+        buf[1] = (byte) (pos & 0xFF);
         // 保存单个记录存储字节数
-        buf[2] = (byte) (recordSize & 0xFF);
-        buf[3] = (byte) (recordSize & 0xFF00);
+        buf[2] = (byte) (recordSize >>> 8 & 0xFF);
+        buf[3] = (byte) (recordSize & 0xFF);
         return Arrays.copyOf(buf, pos);
     }
 
@@ -147,8 +151,9 @@ public class SerializerImpl implements Serializer {
         }
         SchemaImpl schemaImpl = (SchemaImpl) schema;
         Factory factory = Global.getInstance().getFactory();
-        RecordImpl recordImpl = (RecordImpl) factory.produceRecords(1, schemaImpl.getRecordSize())[0];
         Field[] fields = schemaImpl.getFields();
+        RecordImpl recordImpl = (RecordImpl) factory.produceRecords(1, fields.length)[0];
+
 
         // 略过前导的标志位字节
         int pos = (int) Math.ceil(1.0 * (1 + fields.length) / 8);
@@ -184,16 +189,16 @@ public class SerializerImpl implements Serializer {
         Schema schema = factory.produceSchema();
         SchemaImpl schemaImpl = (SchemaImpl) schema;
 
-        // pos[0, 1]为表格式的存储字节数
+        // pos[0, 1]为表格式的存储字节数，最后保存
         int pos = 2;
         // 读取单条记录的存储字节数
-        schemaImpl.setRecordSize(Unsigned.toUnsignedByte(bytes[pos++]) | Unsigned.toUnsignedByte(bytes[pos++]) << 8);
+        schemaImpl.setRecordSize(Unsigned.toUnsignedByte(bytes[pos++]) << 8 | Unsigned.toUnsignedByte(bytes[pos++]));
         // 读取新纪录的偏移记录数
         schemaImpl.setNewRecordOffset(
-                Unsigned.toUnsignedByte(bytes[pos++]) |
-                Unsigned.toUnsignedByte(bytes[pos++]) << 8 |
+                Unsigned.toUnsignedByte(bytes[pos++]) << 20 |
                 Unsigned.toUnsignedByte(bytes[pos++]) << 16 |
-                Unsigned.toUnsignedByte(bytes[pos++]) << 20);
+                Unsigned.toUnsignedByte(bytes[pos++]) << 8 |
+                Unsigned.toUnsignedByte(bytes[pos++]));
 
         // 读取字段个数
         int fieldSize = Unsigned.toUnsignedByte(bytes[pos++]);

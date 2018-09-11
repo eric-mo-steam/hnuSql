@@ -22,7 +22,7 @@ public class Field {
      */
     private boolean isKey;
 
-    public Field(String name, int length, FieldType fieldType) {
+    public Field(String name, FieldType fieldType, int length) {
         this.name = name;
         this.length = length;
         this.fieldType = fieldType;

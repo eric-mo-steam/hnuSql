@@ -15,135 +15,86 @@ import java.util.Arrays;
 
 public class Main {
     public static void main(String[] args) {
-        testReadRecords();
+        testPrintAllRecord();
     }
 
-    public static void testArraysCopy() {
-        byte[] bytes = new byte[10];
-        bytes[9] = 1;
-        bytes[8] = 1;
-        byte[] bytes2 = Arrays.copyOfRange(bytes, 5, 10);
-        System.out.println(bytes2);
-    }
-
-    public static void testEnum() {
-        System.out.println(Status.valueOf(""));
-    }
-
-    public static void testRecordGroup() {
-        Schema schema = null;
-        Table table = new Table(schema, 1);
-    }
-
-    public static void testNIO() {
-        FileInputStream fout = null;
-        try {
-            fout = new FileInputStream("NIO-test.txt");
-            FileChannel channel = fout.getChannel();
-            ByteBuffer rBuffer = ByteBuffer.allocate(1);
-            int size = channel.read(rBuffer);
-            System.out.write(rBuffer.array());
-//            int i = 9;
-//            ByteBuffer byteBuffer = ByteBuffer.wrap("1".getBytes());
-//            channel.position(0);
-//            channel.write(byteBuffer);
-//            channel.read(rBuffer);
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
-            e.printStackTrace();
+    public static void testPrintAllSchema() {
+        Persistence storage = Global.getInstance().getPersistence();
+        Schema[] schemas = storage.loadSchemas();
+        for (Schema schema : schemas) {
+            printSchema(schema);
         }
     }
 
-    public static void testGetBigIntegerBytes() {
-        BigInteger bi = new BigInteger("256");
-        System.out.println(bi.setBit(31));
-        System.out.println(0);
-        System.out.print("[");
-        for (byte b : bi.toByteArray()) {
-            System.out.print(b + ", ");
-        }
-        System.out.println("]");
-    }
-
-    public static void testGetExponent() {
-        System.out.println(Math.getExponent(Math.pow(10, 2) - 1) + 2);
-    }
-
-    public static void testBigInteger() {
-        byte[] b = new byte[2];
-        b[0] = (byte)128;
-        b[1] = 0;
-        BigInteger bigInteger = new BigInteger(b);
-        System.out.println(bigInteger.toString());
-    }
-
-    public static void testEncode() {
-        Charset charset = Charset.forName("utf32");
-        System.out.println("a".getBytes(charset).length);
-    }
-
-    public static void testExample() {
-        Field field1 = new Field();
-        field1.setFieldType(FieldType.INTEGER);
-        field1.setName("id");
-        field1.setLength(8);
-        Field field2 = new Field();
-        field2.setFieldType(FieldType.CHAR);
-        field2.setLength(20);
-        field2.setName("name");
-        Schema schema = new SchemaImpl();
-        schema.setFields(new Field[] {field1, field2});
-        schema.setTableName("test");
-
+    public static void testCreateSchema() {
         Persistence storage = Global.getInstance().getPersistence();
-
-        boolean b = storage.writeSchema(schema);
-//        storage.loadSchemas();
+        Factory factory = Global.getInstance().getFactory();
+        Schema schema = factory.produceSchema();
+        schema.setTableName("hello");
+        schema.setStatus(Status.NEW);
+        Field field1 = new Field("num", FieldType.INTEGER, 5);
+        field1.setPrimary(true);
+        field1.setKey(true);
+        schema.setFields(new Field[]{field1});
+        storage.writeSchema(schema);
     }
 
 
-    public static void testWriteRecords() {
+    public static void testUpdateSchema() {
+        /** 更新表格式，要看是否有对应记录的数据 **/
         Persistence storage = Global.getInstance().getPersistence();
-        Field field1 = new Field("id", 8, FieldType.INTEGER);
-        Field field2 = new Field("name", 20, FieldType.CHAR);
+        Schema[] schemas = storage.loadSchemas();
+        schemas[1].setFields(new Field[]{new Field("yy", FieldType.INTEGER, 5)});
+        storage.writeSchema(schemas[1]);
+    }
 
-        SchemaImpl schema = new SchemaImpl();
-        schema.setTableName("test");
-        schema.setFields(new Field[]{field1, field2});
-        schema.setRecordSize(85);
+    public static void testDeleteSchema() {
+        /** 未实现 **/
+    }
 
-        Table table = new Table(schema, 3);
+    public static void testPrintAllRecord() {
+        Persistence storage = Global.getInstance().getPersistence();
+        Schema[] schemas = storage.loadSchemas();
+        Table table = new Table(schemas[0], 64);
+        storage.open(table);
+        storage.loadRecords(table);
         Record[] records = table.getRecords();
+        for (Record record : records) {
+            if (record.getStatus() == Status.LOAD) {
+                printRecord(record);
+            }
+        }
+    }
 
-        records[0].setColumn(0, BigInteger.valueOf(12));
-        records[0].setColumn(1, "mo");
-        records[0].setStatus(Status.NEW);
-
-        records[1].setColumn(0, BigInteger.valueOf(45));
-        records[1].setColumn(1, "xiao");
-        records[1].setStatus(Status.NEW);
-
-        records[2].setColumn(0, BigInteger.valueOf(60));
-        records[2].setColumn(1, "jiang");
-        records[2].setStatus(Status.NEW);
-
+    public static void testInsertRecord() {
+        Persistence storage = Global.getInstance().getPersistence();
+        Schema[] schemas = storage.loadSchemas();
+        Table table = new Table(schemas[0], 1);     // 插入一条数据
+        Record record = table.getRecords()[0];
+        record.setStatus(Status.NEW);
+        record.setColumn(0, BigInteger.valueOf(123));
         storage.open(table);
         storage.writeRecords(table);
     }
 
-    public static void testReadRecords() {
-        Persistence storage = Global.getInstance().getPersistence();
-        Field field1 = new Field("id", 8, FieldType.INTEGER);
-        Field field2 = new Field("name", 20, FieldType.CHAR);
+    private static void printRecord(Record record) {
+        System.out.print("[");
+        System.out.print(record.getStatus());
+        for(int i = 0;i < record.getColumnSize();i++) {
+            System.out.print(", " + record.getColumn(i));
+        }
+        System.out.println("]");
+    }
 
-        SchemaImpl schema = new SchemaImpl();
-        schema.setTableName("test");
-        schema.setFields(new Field[]{field1, field2});
-        schema.setRecordSize(85);
-
-        Table table = new Table(schema, 3);
-        storage.open(table);
-        storage.loadRecords(table);
+    private static void printSchema(Schema schema) {
+        System.out.println(schema.getTableName() + ":");
+        System.out.println("\t" + schema.getStatus());
+        System.out.println("\tFields:");
+        Field[] fields = schema.getFields();
+        for (Field field : fields) {
+            System.out.print("\t\t[");
+            System.out.print(field.getName()+ ", " + field.getFieldType() + ", " + field.getLength());
+            System.out.println("]");
+        }
     }
 }
