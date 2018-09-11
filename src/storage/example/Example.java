@@ -1,23 +1,16 @@
 package storage.example;
 
-import com.sun.xml.internal.ws.policy.privateutil.PolicyUtils;
 import common.Status;
 import exception.StorageException;
-import javafx.scene.control.Tab;
-import number.Unsigned;
 import storage.Persistence;
 import storage.Serializer;
-import structure.Field;
-import structure.Record;
-import structure.Schema;
-import structure.Table;
+import structure.*;
 
 import java.io.*;
-import java.math.BigInteger;
 import java.nio.ByteBuffer;
-import java.nio.channels.Channel;
 import java.nio.channels.FileChannel;
-import java.util.Arrays;
+import java.util.*;
+import java.util.stream.Collectors;
 
 public class Example implements Persistence {
     /**
@@ -46,6 +39,12 @@ public class Example implements Persistence {
     private static final String TABLE_DATA_SUFFIX = ".MYD";
 
     /**
+     * 索引数据的后缀名
+     */
+    private static final String INDEX_DATA_SUFFIX = ".INDEX";
+
+
+    /**
      * 当前可用于读写的表
      */
     private Table currentTable;
@@ -53,6 +52,47 @@ public class Example implements Persistence {
      * 当前的偏移记录数
      */
     private long currentRecordOffset;
+
+    /**
+     * 通过索引读取记录数量
+     */
+    private long count=0;
+
+
+    /**
+     * 记录当前索引对象
+     */
+    private HashMap<String,FieldIndex> indexMap=new HashMap<>();
+
+    /**
+     * 索引
+     */
+    class Index implements Serializable{
+        Object value;
+        long offset;
+        public Index(Object value, long offset) {
+            this.value = value;
+            this.offset = offset;
+        }
+    }
+
+    /**
+     * 字段对应的所有索引
+     */
+    class FieldIndex implements Serializable{
+
+        ArrayList<Index> indexs;
+
+        String fieldName;
+
+        public FieldIndex(ArrayList<Index> indexs, String fieldName) {
+            this.indexs = indexs;
+            this.fieldName = fieldName;
+        }
+    }
+
+
+
 
     public Example() {
         serializer = new SerializerImpl();
@@ -220,13 +260,339 @@ public class Example implements Persistence {
             schemaImpl.setNewRecordOffset(newRecordOffset);
             writeSchema(schemaImpl);
         }
+        /**
+         * 保存索引
+         */
+        this.writeIndex(table);
+
         return count;
 
 
     }
 
+    /**
+     * 将字段索引写进磁盘
+     * @param indexs
+     */
+    public void writeFieldIndex(FieldIndex indexs){
+
+        String filepath = ROOT + File.separator + indexs.fieldName + INDEX_DATA_SUFFIX;
+        try {
+            ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(filepath));
+            out.writeObject(indexs);
+            out.flush();
+            out.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+    }
+
+    /**
+     * 获取字段索引
+     * @param field
+     * @return
+     */
+    public FieldIndex getIndexs(Field field){
+
+        //先从内存中读取，没有再读取磁盘
+        if (indexMap.get(field.getName())!=null){
+            return indexMap.get(field.getName());
+        }
+
+        String filepath = ROOT + File.separator + field.getName() + INDEX_DATA_SUFFIX;
+        FileInputStream inputStream;
+        try {
+            inputStream=new FileInputStream(filepath);
+            byte[] bytes=new byte[inputStream.available()];
+            new DataInputStream(inputStream).readFully(bytes);
+            ByteArrayInputStream bais = new ByteArrayInputStream(bytes);
+            ObjectInputStream ois;
+            FieldIndex indexs = null;
+            try {
+                ois = new ObjectInputStream(bais);
+                bais.close();
+                indexs = (FieldIndex) ois.readObject();
+
+                //加载进内存
+                indexMap.put(field.getName(),indexs);
+
+                return indexs;
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }  catch (IOException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+
+    /**
+     * 保存表中具有索引的字段
+     * @param table
+     */
+    public void writeIndex(Table table){
+
+        Field[] fields=table.getSchema().getFields();
+        Record[] records=table.getRecords();
+        for (int i = 0; i < fields.length; i++) {
+            if (fields[i].isKey()||fields[i].isPrimary()){
+                FieldIndex indexs=getIndexs(fields[i]);
+
+                for (Record record:records) {
+                    Index index=new Index(record.getColumn(i),((RecordImpl)record).getOffset());
+                    indexs.indexs.add(index);
+                }
+                //将索引写进磁盘
+                this.writeFieldIndex(indexs);
+
+                indexMap.put(fields[i].getName(),indexs);
+            }
+        }
+
+    }
+
+
     @Override
-    public long loadRecordsById(Table table, Field[] indexs, Object[] lowerBounds, Object[] upperBounds) {
+    public long loadRecordsById(Table table, Field index, Object lowerBound, Object upperBound) {
+        //TODO
+
+        FieldIndex fieldIndex=this.getIndexs(index);
+
+        if (fieldIndex==null){
+            return 0;
+        }
+
+        if(index.getFieldType()==FieldType.INTEGER){
+            if ((int)lowerBound>(int)upperBound){
+                return 0;
+            }
+            else if ((int)lowerBound==(int)upperBound){
+                for (Index i:fieldIndex.indexs) {
+                    if (i.equals(lowerBound)){
+                        long offset=i.offset;
+                        ByteBuffer bytes=ByteBuffer.allocate(((SchemaImpl)table.getSchema()).getRecordSize());
+
+                        SchemaImpl schemaImpl = (SchemaImpl) table.getSchema();
+
+                        String filepath = ROOT + File.separator + schemaImpl.getTableName() + TABLE_DATA_SUFFIX;
+
+                        int isExist=this.readFile(filepath,offset*schemaImpl.getRecordSize(),bytes);
+                        if (isExist!=-1){
+                            table.getRecords()[0]=this.serializer.deserializeRecord(schemaImpl,bytes.array());
+                            ((RecordImpl)table.getRecords()[0]).setOffset(offset);
+                        }
+                        return 1;
+                    }
+                }
+            }else {
+
+                ArrayList<Index> list=fieldIndex.indexs;
+                list.sort(new Comparator() {
+                    @Override
+                    public int compare(Object o1, Object o2) {
+
+                        if((int)((Index)o1).value>(int)((Index)o2).value){
+                            return 1;
+                        }else {
+                            return 0;
+                        }
+                    }
+                });
+
+                Object[] values=list.stream().map(e->(int)e.value).collect(Collectors.toList()).toArray();
+                int i=Arrays.binarySearch(values,lowerBound);
+                int j=Arrays.binarySearch(values,upperBound);
+
+                int size=table.getRecords().length;
+
+                if(i<=0&&j>=list.size()){
+                    long c=0;
+                    if(j>size){
+                        long k = count;
+                        for (int m=0; k < list.size()&&k<count+size; k++,m++) {
+                            long offset=list.get((int)k).offset;
+                            ByteBuffer bytes=ByteBuffer.allocate(((SchemaImpl)table.getSchema()).getRecordSize());
+
+                            SchemaImpl schemaImpl = (SchemaImpl) table.getSchema();
+
+                            String filepath = ROOT + File.separator + schemaImpl.getTableName() + TABLE_DATA_SUFFIX;
+
+                            int isExist=this.readFile(filepath,offset*schemaImpl.getRecordSize(),bytes);
+                            if (isExist!=-1){
+                                table.getRecords()[m]=this.serializer.deserializeRecord(schemaImpl,bytes.array());
+                                ((RecordImpl)table.getRecords()[m]).setOffset(offset);
+                            }
+                            c++;
+                        }
+                    count+=k;
+                    return c;
+                    }else {
+                        c=0;
+                        for (int k = 0; k < list.size(); k++) {
+                            long offset=list.get(k).offset;
+                            ByteBuffer bytes=ByteBuffer.allocate(((SchemaImpl)table.getSchema()).getRecordSize());
+                            SchemaImpl schemaImpl = (SchemaImpl) table.getSchema();
+                            String filepath = ROOT + File.separator + schemaImpl.getTableName() + TABLE_DATA_SUFFIX;
+
+                            int isExist=this.readFile(filepath,offset*schemaImpl.getRecordSize(),bytes);
+                            if (isExist!=-1){
+                                table.getRecords()[k]=this.serializer.deserializeRecord(schemaImpl,bytes.array());
+                                ((RecordImpl)table.getRecords()[k]).setOffset(offset);
+                            }
+                            c++;
+                        }
+                        return c;
+                    }
+
+
+                }else if(j>=list.size()){
+                    int c=0;
+                    if (list.size()-i>size){
+                        long k = count;
+                        for (int m=0; k < list.size()&&k<count+size; k++,m++) {
+                            long offset=list.get((int)k).offset;
+                            ByteBuffer bytes=ByteBuffer.allocate(((SchemaImpl)table.getSchema()).getRecordSize());
+
+                            SchemaImpl schemaImpl = (SchemaImpl) table.getSchema();
+
+                            String filepath = ROOT + File.separator + schemaImpl.getTableName() + TABLE_DATA_SUFFIX;
+
+                            int isExist=this.readFile(filepath,offset*schemaImpl.getRecordSize(),bytes);
+                            if (isExist!=-1){
+                                table.getRecords()[m]=this.serializer.deserializeRecord(schemaImpl,bytes.array());
+                                ((RecordImpl)table.getRecords()[m]).setOffset(offset);
+                            }
+                            c++;
+                        }
+                        count+=k;
+                        return c;
+
+                    }else {
+                        for (int k = i; k < list.size(); k++) {
+                            long offset=list.get(k).offset;
+                            ByteBuffer bytes=ByteBuffer.allocate(((SchemaImpl)table.getSchema()).getRecordSize());
+                            SchemaImpl schemaImpl = (SchemaImpl) table.getSchema();
+                            String filepath = ROOT + File.separator + schemaImpl.getTableName() + TABLE_DATA_SUFFIX;
+
+                            int isExist=this.readFile(filepath,offset*schemaImpl.getRecordSize(),bytes);
+                            if (isExist!=-1){
+                                table.getRecords()[k]=this.serializer.deserializeRecord(schemaImpl,bytes.array());
+                                ((RecordImpl)table.getRecords()[k]).setOffset(offset);
+                            }
+                            c++;
+                        }
+                        return c;
+                    }
+
+
+                }else if(i<=0){
+                    int c=0;
+                    if(j>size){
+                        long k = count;
+                        for (int m=0; k <j&&k<count+size; k++,m++) {
+                            long offset=list.get((int)k).offset;
+                            ByteBuffer bytes=ByteBuffer.allocate(((SchemaImpl)table.getSchema()).getRecordSize());
+
+                            SchemaImpl schemaImpl = (SchemaImpl) table.getSchema();
+
+                            String filepath = ROOT + File.separator + schemaImpl.getTableName() + TABLE_DATA_SUFFIX;
+
+                            int isExist=this.readFile(filepath,offset*schemaImpl.getRecordSize(),bytes);
+                            if (isExist!=-1){
+                                table.getRecords()[m]=this.serializer.deserializeRecord(schemaImpl,bytes.array());
+                                ((RecordImpl)table.getRecords()[m]).setOffset(offset);
+                            }
+                            c++;
+                        }
+                        count+=k;
+                        return c;
+
+                    }else {
+                        c=0;
+                        for (int k = 0; k <j; k++) {
+                            long offset=list.get(k).offset;
+                            ByteBuffer bytes=ByteBuffer.allocate(((SchemaImpl)table.getSchema()).getRecordSize());
+                            SchemaImpl schemaImpl = (SchemaImpl) table.getSchema();
+                            String filepath = ROOT + File.separator + schemaImpl.getTableName() + TABLE_DATA_SUFFIX;
+
+                            int isExist=this.readFile(filepath,offset*schemaImpl.getRecordSize(),bytes);
+                            if (isExist!=-1){
+                                table.getRecords()[k]=this.serializer.deserializeRecord(schemaImpl,bytes.array());
+                                ((RecordImpl)table.getRecords()[k]).setOffset(offset);
+                            }
+                            c++;
+                        }
+                        return c;
+
+                    }
+
+                }else {
+                    int c=0;
+                    if(j-i>size){
+                        long k = count+i;
+                        for (int m=0; k <j&&k<count+size; k++,m++) {
+                            long offset=list.get((int)k).offset;
+                            ByteBuffer bytes=ByteBuffer.allocate(((SchemaImpl)table.getSchema()).getRecordSize());
+
+                            SchemaImpl schemaImpl = (SchemaImpl) table.getSchema();
+
+                            String filepath = ROOT + File.separator + schemaImpl.getTableName() + TABLE_DATA_SUFFIX;
+
+                            int isExist=this.readFile(filepath,offset*schemaImpl.getRecordSize(),bytes);
+                            if (isExist!=-1){
+                                table.getRecords()[m]=this.serializer.deserializeRecord(schemaImpl,bytes.array());
+                                ((RecordImpl)table.getRecords()[m]).setOffset(offset);
+                            }
+                            c++;
+                        }
+                        count+=k;
+                        return c;
+
+                    }else {
+
+                        c=0;
+                        for (int k = i; k <j; k++) {
+                            long offset=list.get(k).offset;
+                            ByteBuffer bytes=ByteBuffer.allocate(((SchemaImpl)table.getSchema()).getRecordSize());
+                            SchemaImpl schemaImpl = (SchemaImpl) table.getSchema();
+                            String filepath = ROOT + File.separator + schemaImpl.getTableName() + TABLE_DATA_SUFFIX;
+
+                            int isExist=this.readFile(filepath,offset*schemaImpl.getRecordSize(),bytes);
+                            if (isExist!=-1){
+                                table.getRecords()[k]=this.serializer.deserializeRecord(schemaImpl,bytes.array());
+                                ((RecordImpl)table.getRecords()[k]).setOffset(offset);
+                            }
+                            c++;
+                        }
+                        return c;
+                    }
+
+                }
+            }
+
+        }else {
+
+            for (Index i:fieldIndex.indexs) {
+                if (i.equals(lowerBound)){
+                    long offset=i.offset;
+                    ByteBuffer bytes=ByteBuffer.allocate(((SchemaImpl)table.getSchema()).getRecordSize());
+
+                    SchemaImpl schemaImpl = (SchemaImpl) table.getSchema();
+
+                    String filepath = ROOT + File.separator + schemaImpl.getTableName() + TABLE_DATA_SUFFIX;
+
+                    int isExist=this.readFile(filepath,offset*schemaImpl.getRecordSize(),bytes);
+                    if (isExist!=-1){
+                        table.getRecords()[0]=this.serializer.deserializeRecord(schemaImpl,bytes.array());
+                        ((RecordImpl)table.getRecords()[0]).setOffset(offset);
+                    }
+                    return 1;
+                }
+            }
+        }
+
         return 0;
     }
 
